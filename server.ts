@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import Stripe from "stripe";
@@ -12,9 +11,8 @@ const __dirname = path.dirname(__filename);
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
 
-async function startServer() {
+export async function createExpressApp() {
   const app = express();
-  const PORT = 3000;
 
   // Stripe Webhook (must be before express.json())
   app.post(
@@ -37,8 +35,6 @@ async function startServer() {
       // Handle the event (e.g., checkout.session.completed)
       if (event.type === "checkout.session.completed") {
         const session = event.data.object as Stripe.Checkout.Session;
-        // In a real app, you'd update Firestore here via Admin SDK
-        // For this demo, we'll rely on client-side confirmation or a simple API
         console.log("Payment succeeded for session:", session.id);
       }
 
@@ -97,7 +93,8 @@ async function startServer() {
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -111,9 +108,14 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  return app;
 }
 
-startServer();
+if (process.env.NODE_ENV !== "production" || !process.env.VERCEL) {
+  const PORT = 3000;
+  createExpressApp().then((app) => {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  });
+}
