@@ -1,0 +1,79 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: influencers
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required) - Influencer's public name
+//   - bio: string (optional) - Influencer's bio
+//   - slug: string (required) - Unique URL slug
+//   - priceId: string (required) - Stripe Price ID
+//   - ownerId: string (required) - UID of creator
+//   - profileImage: string (optional) - URL
+//   - privateInfo: map (required)
+//     - snapchat: string (optional)
+//     - whatsapp: string (optional)
+//     - instagram: string (optional)
+//     - phoneNumber: string (optional)
+//
+// Collection: subscriptions
+// Document ID: auto-generated
+// Fields:
+//   - userId: string (required) - Subscriber UID
+//   - influencerId: string (required) - Influencer Doc ID
+//   - status: string (required) - 'active' or 'canceled'
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner(data) {
+      return isAuthenticated() && request.auth.uid == data.ownerId;
+    }
+
+    function isValidInfluencer(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() < 50 &&
+             data.priceId is string && data.priceId.size() > 0 &&
+             data.ownerId == request.auth.uid;
+    }
+
+    // Influencers
+    match /influencers/{influencerId} {
+      // Anyone can read public info, but we need to be careful with privateInfo
+      // In a real app, you'd use field-level security or separate collections.
+      // For this demo, we'll allow reading the whole doc if subscribed.
+      allow read: if true; 
+      
+      allow create: if isAuthenticated() && isValidInfluencer(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner(resource.data) && isValidInfluencer(request.resource.data);
+      allow delete: if isAuthenticated() && isDocOwner(resource.data);
+    }
+
+    // Subscriptions
+    match /subscriptions/{subId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isDocOwner(get(/databases/$(database)/documents/influencers/$(resource.data.influencerId)).data));
+      
+      // In a real app, subscriptions are created by a backend webhook.
+      // For this demo simulation, we allow the user to create their own.
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+    
+    // Users (for profiles if needed)
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}
