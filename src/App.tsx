@@ -1,27 +1,6 @@
 import { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate, Link, useSearchParams, useLocation } from "react-router-dom";
-import { auth, db } from "./firebase";
-import { 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  signOut, 
-  onAuthStateChanged, 
-  User 
-} from "firebase/auth";
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  onSnapshot, 
-  doc, 
-  getDoc, 
-  setDoc,
-  updateDoc,
-  serverTimestamp,
-  getDocs
-} from "firebase/firestore";
-import { useAuthState } from "react-firebase-hooks/auth";
+import { supabase, isSupabaseConfigured } from "./lib/supabase";
 import { 
   Plus, 
   LogOut, 
@@ -45,6 +24,12 @@ import {
 import { cn } from "./lib/utils";
 import { motion, AnimatePresence } from "motion/react";
 
+// --- Types ---
+interface User {
+  id: string;
+  email?: string;
+}
+
 // --- Components ---
 
 const VerifiedBadge = ({ className = "w-6 h-6" }: { className?: string }) => (
@@ -59,9 +44,9 @@ const VerifiedBadge = ({ className = "w-6 h-6" }: { className?: string }) => (
   </svg>
 );
 
-const Navbar = ({ user }: { user: User | null | undefined }) => {
-  const handleLogin = () => signInWithPopup(auth, new GoogleAuthProvider());
-  const handleLogout = () => signOut(auth);
+const Navbar = ({ user }: { user: User | null }) => {
+  const handleLogin = () => supabase.auth.signInWithOAuth({ provider: 'google' });
+  const handleLogout = () => supabase.auth.signOut();
   const location = useLocation();
   const isSubscriptionPage = location.pathname.startsWith("/p/");
 
@@ -113,26 +98,72 @@ const LandingPage = () => {
   const [influencer, setInfluencer] = useState<any>(null);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [user] = useAuthState(auth);
+  const [user] = useSupabaseAuth();
 
   useEffect(() => {
     if (!slug) return;
 
-    const q = query(collection(db, "influencers"), where("slug", "==", slug));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        setInfluencer({ id: snapshot.docs[0].id, ...snapshot.docs[0].data() });
+    const fetchInfluencer = async () => {
+      const { data } = await supabase
+        .from("influencers")
+        .select("*")
+        .eq("slug", slug)
+        .single();
+      
+      if (data) {
+        setInfluencer({
+          id: data.id,
+          name: data.name,
+          slug: data.slug,
+          priceId: data.price_id,
+          price: data.price,
+          profileImage: data.profile_image,
+          bannerImage: data.banner_image,
+          ownerId: data.owner_id,
+          privateInfo: data.private_info
+        });
       }
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchInfluencer();
+
+    const channel = supabase
+      .channel(`influencer-${slug}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'influencers',
+          filter: `slug=eq.${slug}`
+        },
+        (payload) => {
+          const data = payload.new as any;
+          setInfluencer({
+            id: data.id,
+            name: data.name,
+            slug: data.slug,
+            priceId: data.price_id,
+            price: data.price,
+            profileImage: data.profile_image,
+            bannerImage: data.banner_image,
+            ownerId: data.owner_id,
+            privateInfo: data.private_info
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [slug]);
 
   useEffect(() => {
     if (!influencer) return;
 
-    let unsub: any = null;
+    let channel: any = null;
 
     const verifyAndCheck = async () => {
       // 1. Check URL session
@@ -142,6 +173,13 @@ const LandingPage = () => {
           const data = await res.json();
           if (data.valid && data.influencerId === influencer.id) {
             setIsSubscribed(true);
+            if (user) {
+              await supabase.from("subscriptions").insert({
+                user_id: user.id,
+                influencer_id: influencer.id,
+                status: "active"
+              });
+            }
             return;
           }
         } catch (e) {
@@ -151,22 +189,39 @@ const LandingPage = () => {
 
       // 2. Check Auth user
       if (user) {
-        const q = query(
-          collection(db, "subscriptions"),
-          where("userId", "==", user.uid),
-          where("influencerId", "==", influencer.id),
-          where("status", "==", "active")
-        );
-        unsub = onSnapshot(q, (snapshot) => {
-          setIsSubscribed(!snapshot.empty);
-        });
+        const { data } = await supabase
+          .from("subscriptions")
+          .select("*")
+          .eq("user_id", user.id)
+          .eq("influencer_id", influencer.id)
+          .eq("status", "active");
+        
+        setIsSubscribed(data && data.length > 0);
+
+        channel = supabase
+          .channel(`sub-${user.id}-${influencer.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'subscriptions',
+              filter: `user_id=eq.${user.id}`
+            },
+            (payload) => {
+              if ((payload.new as any).influencer_id === influencer.id) {
+                setIsSubscribed((payload.new as any).status === 'active');
+              }
+            }
+          )
+          .subscribe();
       }
     };
 
     verifyAndCheck();
 
     return () => {
-      if (unsub) unsub();
+      if (channel) supabase.removeChannel(channel);
     };
   }, [user, influencer, sessionId]);
 
@@ -178,7 +233,7 @@ const LandingPage = () => {
         body: JSON.stringify({
           priceId: influencer.priceId,
           influencerId: influencer.id,
-          userId: user?.uid || "guest",
+          userId: user?.id || "guest",
           successUrl: window.location.origin + window.location.pathname,
           cancelUrl: window.location.href,
         }),
@@ -187,18 +242,15 @@ const LandingPage = () => {
       const data = await response.json();
       
       if (data.url) {
-        // Real Stripe Redirect
         window.location.href = data.url;
       } else if (data.error) {
-        // If Stripe is not configured, we'll fall back to simulation for testing
         console.warn("Stripe error (likely missing keys):", data.error);
         
         if (user) {
-          await addDoc(collection(db, "subscriptions"), {
-            userId: user.uid,
-            influencerId: influencer.id,
-            status: "active",
-            createdAt: serverTimestamp(),
+          await supabase.from("subscriptions").insert({
+            user_id: user.id,
+            influencer_id: influencer.id,
+            status: "active"
           });
           alert("Stripe keys not configured. Simulating subscription for testing.");
         } else {
@@ -394,7 +446,7 @@ const LandingPage = () => {
 };
 
 const Dashboard = () => {
-  const [user] = useAuthState(auth);
+  const [user, loadingAuth] = useSupabaseAuth();
   const [influencers, setInfluencers] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -416,12 +468,47 @@ const Dashboard = () => {
   useEffect(() => {
     if (!user) return;
 
-    const q = query(collection(db, "influencers"), where("ownerId", "==", user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setInfluencers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    const fetchInfluencers = async () => {
+      const { data } = await supabase
+        .from("influencers")
+        .select("*")
+        .eq("owner_id", user.id);
+      if (data) {
+        setInfluencers(data.map(inf => ({
+          id: inf.id,
+          name: inf.name,
+          slug: inf.slug,
+          priceId: inf.price_id,
+          price: inf.price,
+          profileImage: inf.profile_image,
+          bannerImage: inf.banner_image,
+          ownerId: inf.owner_id,
+          privateInfo: inf.private_info
+        })));
+      }
+    };
 
-    return () => unsubscribe();
+    fetchInfluencers();
+
+    const channel = supabase
+      .channel('dashboard-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'influencers',
+          filter: `owner_id=eq.${user.id}`
+        },
+        () => {
+          fetchInfluencers();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user]);
 
   const handleOpenCreate = () => {
@@ -456,25 +543,30 @@ const Dashboard = () => {
     if (!user) return;
 
     const data = {
-      ...formData,
-      ownerId: user.uid,
-      privateInfo: {
+      name: formData.name,
+      slug: formData.slug,
+      price_id: formData.priceId,
+      price: formData.price,
+      profile_image: formData.profileImage,
+      banner_image: formData.bannerImage,
+      owner_id: user.id,
+      private_info: {
         snapchat: formData.snapchat,
         whatsapp: formData.whatsapp,
         instagram: formData.instagram,
         telegram: formData.telegram,
         phoneNumber: formData.phoneNumber
       },
-      updatedAt: serverTimestamp()
+      updated_at: new Date().toISOString()
     };
 
     try {
       if (editingId) {
-        await updateDoc(doc(db, "influencers", editingId), data);
+        await supabase.from("influencers").update(data).eq("id", editingId);
       } else {
-        await addDoc(collection(db, "influencers"), {
+        await supabase.from("influencers").insert({
           ...data,
-          createdAt: serverTimestamp()
+          createdAt: new Date().toISOString()
         });
       }
       setIsModalOpen(false);
@@ -743,9 +835,7 @@ const Dashboard = () => {
   );
 };
 
-const Home = () => {
-  const [user] = useAuthState(auth);
-  
+const Home = ({ user }: { user: User | null }) => {
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
@@ -767,7 +857,7 @@ const Home = () => {
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
             <Link 
               to={user ? "/dashboard" : "#"}
-              onClick={() => !user && signInWithPopup(auth, new GoogleAuthProvider())}
+              onClick={() => !user && supabase.auth.signInWithOAuth({ provider: 'google' })}
               className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2"
             >
               Start Creating <ChevronRight className="w-5 h-5" />
@@ -806,16 +896,69 @@ const Home = () => {
   );
 };
 
+const ConfigRequired = () => (
+  <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+    <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 text-center border border-gray-100">
+      <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600 mx-auto mb-6">
+        <Lock className="w-8 h-8" />
+      </div>
+      <h2 className="text-2xl font-bold text-gray-900 mb-4">Configuration Required</h2>
+      <p className="text-gray-600 mb-8 leading-relaxed">
+        To use this application, you need to connect your Supabase project. 
+        Please add the following environment variables to your project settings:
+      </p>
+      <div className="space-y-3 text-left mb-8">
+        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 font-mono text-xs text-gray-500 break-all">
+          VITE_SUPABASE_URL
+        </div>
+        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 font-mono text-xs text-gray-500 break-all">
+          VITE_SUPABASE_ANON_KEY
+        </div>
+      </div>
+      <p className="text-sm text-gray-400">
+        Once added, the application will automatically refresh.
+      </p>
+    </div>
+  </div>
+);
+
+function useSupabaseAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setLoading(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  return [user, loading] as const;
+}
+
 export default function App() {
-  const [user, loading] = useAuthState(auth);
+  const [user, loading] = useSupabaseAuth();
 
   if (loading) return null;
+  if (!isSupabaseConfigured) return <ConfigRequired />;
 
   return (
     <Router>
       <Navbar user={user} />
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<Home user={user} />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/p/:slug" element={<LandingPage />} />
       </Routes>
