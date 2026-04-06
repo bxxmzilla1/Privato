@@ -45,7 +45,25 @@ const VerifiedBadge = ({ className = "w-6 h-6" }: { className?: string }) => (
 );
 
 const Navbar = ({ user }: { user: User | null }) => {
-  const handleLogin = () => supabase.auth.signInWithOAuth({ provider: 'google' });
+  const [email, setEmail] = useState("");
+  const [showEmailLogin, setShowEmailLogin] = useState(false);
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Check your email for the login link!");
+      setShowEmailLogin(false);
+    }
+  };
+
   const handleLogout = () => supabase.auth.signOut();
   const location = useLocation();
   const isSubscriptionPage = location.pathname.startsWith("/p/");
@@ -74,14 +92,31 @@ const Navbar = ({ user }: { user: User | null }) => {
               </button>
             </>
           ) : (
-            !isSubscriptionPage && (
-              <button 
-                onClick={handleLogin}
-                className="px-6 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
-              >
-                Creator Login
-              </button>
-            )
+            <div className="flex items-center gap-2">
+              {showEmailLogin ? (
+                <form onSubmit={handleEmailLogin} className="flex items-center gap-2">
+                  <input 
+                    type="email" 
+                    placeholder="Email" 
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="px-3 py-1.5 text-sm border border-gray-200 rounded-full focus:ring-2 focus:ring-indigo-500 outline-none"
+                    required
+                  />
+                  <button type="submit" className="px-4 py-1.5 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-all">
+                    Send Link
+                  </button>
+                  <button type="button" onClick={() => setShowEmailLogin(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                </form>
+              ) : (
+                <button 
+                  onClick={() => setShowEmailLogin(true)}
+                  className="px-6 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                >
+                  Creator Login
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -836,6 +871,26 @@ const Dashboard = () => {
 };
 
 const Home = ({ user }: { user: User | null }) => {
+  const [email, setEmail] = useState("");
+  const [showEmailLogin, setShowEmailLogin] = useState(false);
+  const navigate = useNavigate();
+
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+    if (error) {
+      alert(error.message);
+    } else {
+      alert("Check your email for the login link!");
+      setShowEmailLogin(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
@@ -854,17 +909,57 @@ const Home = ({ user }: { user: User | null }) => {
           <p className="text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
             Create beautiful subscription landing pages in seconds. Reveal your Snapchat, WhatsApp, or phone number only to paid subscribers.
           </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
-            <Link 
-              to={user ? "/dashboard" : "#"}
-              onClick={() => !user && supabase.auth.signInWithOAuth({ provider: 'google' })}
-              className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2"
-            >
-              Start Creating <ChevronRight className="w-5 h-5" />
-            </Link>
-            <button className="w-full sm:w-auto px-8 py-4 bg-white text-gray-700 border border-gray-200 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all">
-              View Demo
-            </button>
+          
+          <div className="flex flex-col items-center justify-center gap-6 pt-4">
+            {!user && showEmailLogin ? (
+              <motion.form 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                onSubmit={handleEmailLogin} 
+                className="w-full max-w-sm space-y-4 p-6 bg-gray-50 rounded-3xl border border-gray-100"
+              >
+                <div className="text-left">
+                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Creator Email</label>
+                  <input 
+                    type="email" 
+                    placeholder="you@example.com" 
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="w-full px-4 py-3 mt-1 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    required
+                  />
+                </div>
+                <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
+                  Send Magic Link
+                </button>
+                <button type="button" onClick={() => setShowEmailLogin(false)} className="text-sm text-gray-400 hover:text-gray-600">
+                  Back
+                </button>
+              </motion.form>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
+                <button 
+                  onClick={() => {
+                    if (user) {
+                      navigate("/dashboard");
+                    } else {
+                      setShowEmailLogin(true);
+                    }
+                  }}
+                  className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2"
+                >
+                  {user ? "Go to Dashboard" : "Start Creating"} <ChevronRight className="w-5 h-5" />
+                </button>
+                {!user && (
+                  <button 
+                    onClick={() => setShowEmailLogin(true)}
+                    className="w-full sm:w-auto px-8 py-4 bg-white text-gray-700 border border-gray-200 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all"
+                  >
+                    Login with Email
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </motion.div>
 
