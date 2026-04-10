@@ -20,7 +20,8 @@ import {
   Edit,
   Copy,
   Check,
-  Send
+  Send,
+  Trash2
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -470,6 +471,7 @@ const Dashboard = () => {
   const [influencers, setInfluencers] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
@@ -595,6 +597,21 @@ const Dashboard = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleDelete = async () => {
+    if (!deletingId || !user) return;
+    
+    try {
+      const { error } = await supabase.from('influencers').delete().eq('id', deletingId);
+      if (error) throw error;
+      
+      setInfluencers(influencers.filter(inf => inf.id !== deletingId));
+      setDeletingId(null);
+    } catch (error: any) {
+      console.error("Error deleting influencer page:", error);
+      alert("Failed to delete: " + error.message);
+    }
+  };
+
   if (!user) return <div className="p-8 text-center">Please sign in to access the dashboard.</div>;
 
   return (
@@ -636,13 +653,22 @@ const Dashboard = () => {
                     <p className="text-sm text-gray-500">/{inf.slug}</p>
                   </div>
                 </div>
-                <button 
-                  onClick={() => handleOpenEdit(inf)}
-                  className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                  title="Edit Page"
-                >
-                  <Edit className="w-5 h-5" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => handleOpenEdit(inf)}
+                    className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                    title="Edit Page"
+                  >
+                    <Edit className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => setDeletingId(inf.id)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                    title="Delete Page"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
               
               <div className="flex-1 mb-6">
@@ -853,6 +879,42 @@ const Dashboard = () => {
                       {editingId ? "Update Page" : "Create Page"}
                     </button>
                   </form>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {deletingId && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden"
+              >
+                <div className="p-8 text-center">
+                  <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Trash2 className="w-8 h-8" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">Delete Page?</h2>
+                  <p className="text-gray-600 mb-8">This action cannot be undone. All subscriptions tied to this page will be affected.</p>
+                  
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => setDeletingId(null)}
+                      className="flex-1 py-3 px-4 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={handleDelete}
+                      className="flex-1 py-3 px-4 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </motion.div>
             </div>
