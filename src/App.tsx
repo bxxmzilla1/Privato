@@ -96,7 +96,7 @@ const LandingPage = () => {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [paymentMode, setPaymentMode] = useState<"subscribe" | "tip">("subscribe");
-  const [tipAmount, setTipAmount] = useState<string>("5.00");
+  const [tipAmount, setTipAmount] = useState<string>("");
 
   const allowedPaymentType = influencer?.paymentType || "both";
   const activeMode = allowedPaymentType === "both" ? paymentMode : allowedPaymentType;
@@ -279,14 +279,14 @@ const LandingPage = () => {
             {influencer.name}
             <VerifiedBadge className="w-7 h-7" />
           </h1>
-          <div className="flex items-center justify-center gap-1.5 text-gray-500 text-sm font-medium mb-8">
+          <div className="flex items-center justify-center gap-1.5 text-gray-500 text-sm font-medium mb-2">
             <Check className="w-4 h-4 text-green-500" />
             <span>ID Verified</span>
           </div>
 
             {!isSubscribed ? (
               <div className="space-y-6">
-                <div className="py-8">
+                <div className="pt-2 pb-8">
                   {activeMode === "tip" ? (
                     <>
                       <div className="w-16 h-16 bg-pink-100 text-pink-600 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -343,7 +343,7 @@ const LandingPage = () => {
                           value={tipAmount}
                           onChange={(e) => setTipAmount(e.target.value)}
                           className="w-full pl-8 pr-4 py-4 bg-gray-50 border border-gray-200 rounded-xl font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                          placeholder="Amount"
+                          placeholder="5.00"
                         />
                       </div>
                       <button 
