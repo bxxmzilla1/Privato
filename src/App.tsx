@@ -54,7 +54,7 @@ const Navbar = ({ user, onOpenAuth }: { user: User | null | undefined, onOpenAut
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-2 font-bold text-xl tracking-tight text-indigo-600">
           <Lock className="w-6 h-6" />
-          <span>Privato</span>
+          <span>Fans.Tip</span>
         </div>
         <div className="flex items-center gap-4">
           {user ? (
@@ -358,7 +358,7 @@ const LandingPage = () => {
                   
                   <div className="mt-8 flex items-center justify-center gap-1 text-gray-400 font-bold text-xs tracking-tight opacity-30">
                     <Lock className="w-3 h-3" />
-                    <span>Privato</span>
+                    <span>Fans.Tip</span>
                   </div>
                 </div>
               </div>
@@ -471,7 +471,7 @@ const LandingPage = () => {
 
                 <div className="mt-8 flex items-center justify-center gap-1 text-gray-400 font-bold text-xs tracking-tight opacity-30">
                   <Lock className="w-3 h-3" />
-                  <span>Privato</span>
+                  <span>Fans.Tip</span>
                 </div>
               </motion.div>
             )}
