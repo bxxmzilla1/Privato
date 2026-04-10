@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "influencer": {
+      "title": "Influencer",
+      "description": "Details of an influencer and their private contact info.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Influencer's public name" },
+        "profileImage": { "type": "string", "description": "URL to profile image" },
+        "bannerImage": { "type": "string", "description": "URL to banner image" },
+        "privateInfo": {
+          "type": "object",
+          "properties": {
+            "snapchat": { "type": "string" },
+            "whatsapp": { "type": "string" },
+            "instagram": { "type": "string" },
+            "phoneNumber": { "type": "string" }
+          },
+          "description": "The private info revealed after subscription"
+        },
+        "priceId": { "type": "string", "description": "Stripe Price ID for the subscription" },
+        "price": { "type": "string", "description": "Display price (e.g., $9.99/mo)" },
+        "paymentType": { "type": "string", "enum": ["both", "subscribe", "tip"], "description": "Allowed payment types" },
+        "ownerId": { "type": "string", "description": "UID of the user who created this page" },
+        "slug": { "type": "string", "description": "Unique URL slug for the landing page" }
+      },
+      "required": ["name", "ownerId", "slug", "priceId"]
+    },
+    "subscription": {
+      "title": "Subscription",
+      "description": "Record of a user's subscription to an influencer.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "UID of the subscriber" },
+        "influencerId": { "type": "string", "description": "ID of the influencer" },
+        "status": { "type": "string", "enum": ["active", "canceled"] },
+        "stripeSubscriptionId": { "type": "string" }
+      },
+      "required": ["userId", "influencerId", "status"]
+    }
+  },
+  "firestore": {
+    "/influencers/{influencerId}": {
+      "schema": "influencer",
+      "description": "Collection of influencer landing pages"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "subscription",
+      "description": "Collection of active subscriptions"
+    }
+  }
+}

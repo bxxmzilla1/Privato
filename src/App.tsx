@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate, Link, useSearchParams, useLocation } from "react-router-dom";
-import { supabase, isSupabaseConfigured } from "./lib/supabase";
+import { supabase } from "./supabase";
+import { User } from "@supabase/supabase-js";
 import { 
   Plus, 
   LogOut, 
@@ -24,12 +25,6 @@ import {
 import { cn } from "./lib/utils";
 import { motion, AnimatePresence } from "motion/react";
 
-// --- Types ---
-interface User {
-  id: string;
-  email?: string;
-}
-
 // --- Components ---
 
 const VerifiedBadge = ({ className = "w-6 h-6" }: { className?: string }) => (
@@ -44,26 +39,7 @@ const VerifiedBadge = ({ className = "w-6 h-6" }: { className?: string }) => (
   </svg>
 );
 
-const Navbar = ({ user }: { user: User | null }) => {
-  const [email, setEmail] = useState("");
-  const [showEmailLogin, setShowEmailLogin] = useState(false);
-
-  const handleEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: window.location.origin,
-      },
-    });
-    if (error) {
-      alert(error.message);
-    } else {
-      alert("Check your email for the login link!");
-      setShowEmailLogin(false);
-    }
-  };
-
+const Navbar = ({ user, onOpenAuth }: { user: User | null | undefined, onOpenAuth: () => void }) => {
   const handleLogout = () => supabase.auth.signOut();
   const location = useLocation();
   const isSubscriptionPage = location.pathname.startsWith("/p/");
@@ -92,31 +68,14 @@ const Navbar = ({ user }: { user: User | null }) => {
               </button>
             </>
           ) : (
-            <div className="flex items-center gap-2">
-              {showEmailLogin ? (
-                <form onSubmit={handleEmailLogin} className="flex items-center gap-2">
-                  <input 
-                    type="email" 
-                    placeholder="Email" 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="px-3 py-1.5 text-sm border border-gray-200 rounded-full focus:ring-2 focus:ring-indigo-500 outline-none"
-                    required
-                  />
-                  <button type="submit" className="px-4 py-1.5 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-all">
-                    Send Link
-                  </button>
-                  <button type="button" onClick={() => setShowEmailLogin(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                </form>
-              ) : (
-                <button 
-                  onClick={() => setShowEmailLogin(true)}
-                  className="px-6 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
-                >
-                  Creator Login
-                </button>
-              )}
-            </div>
+            !isSubscriptionPage && (
+              <button 
+                onClick={onOpenAuth}
+                className="px-6 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-full hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+              >
+                Creator Login
+              </button>
+            )
           )}
         </div>
       </div>
@@ -133,72 +92,44 @@ const LandingPage = () => {
   const [influencer, setInfluencer] = useState<any>(null);
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [user] = useSupabaseAuth();
+  const [user, setUser] = useState<User | null>(null);
+  const [paymentMode, setPaymentMode] = useState<"subscribe" | "tip">("subscribe");
+  const [tipAmount, setTipAmount] = useState<string>("5.00");
+
+  const allowedPaymentType = influencer?.paymentType || "both";
+  const activeMode = allowedPaymentType === "both" ? paymentMode : allowedPaymentType;
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
     if (!slug) return;
 
     const fetchInfluencer = async () => {
-      const { data } = await supabase
-        .from("influencers")
-        .select("*")
-        .eq("slug", slug)
+      const { data, error } = await supabase
+        .from('influencers')
+        .select('*')
+        .eq('slug', slug)
         .single();
       
       if (data) {
-        setInfluencer({
-          id: data.id,
-          name: data.name,
-          slug: data.slug,
-          priceId: data.price_id,
-          price: data.price,
-          profileImage: data.profile_image,
-          bannerImage: data.banner_image,
-          ownerId: data.owner_id,
-          privateInfo: data.private_info
-        });
+        setInfluencer(data);
       }
       setLoading(false);
     };
 
     fetchInfluencer();
-
-    const channel = supabase
-      .channel(`influencer-${slug}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'influencers',
-          filter: `slug=eq.${slug}`
-        },
-        (payload) => {
-          const data = payload.new as any;
-          setInfluencer({
-            id: data.id,
-            name: data.name,
-            slug: data.slug,
-            priceId: data.price_id,
-            price: data.price,
-            profileImage: data.profile_image,
-            bannerImage: data.banner_image,
-            ownerId: data.owner_id,
-            privateInfo: data.private_info
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [slug]);
 
   useEffect(() => {
     if (!influencer) return;
-
-    let channel: any = null;
 
     const verifyAndCheck = async () => {
       // 1. Check URL session
@@ -208,13 +139,6 @@ const LandingPage = () => {
           const data = await res.json();
           if (data.valid && data.influencerId === influencer.id) {
             setIsSubscribed(true);
-            if (user) {
-              await supabase.from("subscriptions").insert({
-                user_id: user.id,
-                influencer_id: influencer.id,
-                status: "active"
-              });
-            }
             return;
           }
         } catch (e) {
@@ -225,39 +149,17 @@ const LandingPage = () => {
       // 2. Check Auth user
       if (user) {
         const { data } = await supabase
-          .from("subscriptions")
-          .select("*")
-          .eq("user_id", user.id)
-          .eq("influencer_id", influencer.id)
-          .eq("status", "active");
+          .from('subscriptions')
+          .select('*')
+          .eq('userId', user.id)
+          .eq('influencerId', influencer.id)
+          .eq('status', 'active');
         
         setIsSubscribed(data && data.length > 0);
-
-        channel = supabase
-          .channel(`sub-${user.id}-${influencer.id}`)
-          .on(
-            'postgres_changes',
-            {
-              event: '*',
-              schema: 'public',
-              table: 'subscriptions',
-              filter: `user_id=eq.${user.id}`
-            },
-            (payload) => {
-              if ((payload.new as any).influencer_id === influencer.id) {
-                setIsSubscribed((payload.new as any).status === 'active');
-              }
-            }
-          )
-          .subscribe();
       }
     };
 
     verifyAndCheck();
-
-    return () => {
-      if (channel) supabase.removeChannel(channel);
-    };
   }, [user, influencer, sessionId]);
 
   const handleSubscribe = async () => {
@@ -277,16 +179,18 @@ const LandingPage = () => {
       const data = await response.json();
       
       if (data.url) {
+        // Real Stripe Redirect
         window.location.href = data.url;
       } else if (data.error) {
+        // If Stripe is not configured, we'll fall back to simulation for testing
         console.warn("Stripe error (likely missing keys):", data.error);
         
         if (user) {
-          await supabase.from("subscriptions").insert({
-            user_id: user.id,
-            influencer_id: influencer.id,
+          await supabase.from('subscriptions').insert([{
+            userId: user.id,
+            influencerId: influencer.id,
             status: "active"
-          });
+          }]);
           alert("Stripe keys not configured. Simulating subscription for testing.");
         } else {
           const fakeSessionId = "sim_" + Math.random().toString(36).substring(7);
@@ -295,6 +199,42 @@ const LandingPage = () => {
       }
     } catch (error) {
       console.error("Subscription error:", error);
+      alert("Failed to start checkout. Please check your internet connection.");
+    }
+  };
+
+  const handleTip = async () => {
+    if (!tipAmount || isNaN(parseFloat(tipAmount)) || parseFloat(tipAmount) <= 0) {
+      alert("Please enter a valid tip amount.");
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/create-tip-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: parseFloat(tipAmount),
+          influencerId: influencer.id,
+          influencerName: influencer.name,
+          userId: user?.id || "guest",
+          successUrl: window.location.origin + window.location.pathname,
+          cancelUrl: window.location.href,
+        }),
+      });
+
+      const data = await response.json();
+      
+      if (data.url) {
+        window.location.href = data.url;
+      } else if (data.error) {
+        console.warn("Stripe error:", data.error);
+        alert("Stripe keys not configured. Simulating tip for testing.");
+        const fakeSessionId = "sim_" + Math.random().toString(36).substring(7);
+        window.location.href = `${window.location.origin}${window.location.pathname}?session_id=${fakeSessionId}&type=tip`;
+      }
+    } catch (error) {
+      console.error("Tip error:", error);
       alert("Failed to start checkout. Please check your internet connection.");
     }
   };
@@ -347,13 +287,58 @@ const LandingPage = () => {
                 <div className="py-8">
                   <Lock className="w-12 h-12 text-indigo-600 mx-auto mb-4" />
                   <h2 className="text-xl font-bold text-indigo-900 mb-2">Unlock Private Access</h2>
-                  <p className="text-indigo-700/80 mb-8">Subscribe to reveal private socials and contact info.</p>
-                  <button 
-                    onClick={handleSubscribe}
-                    className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
-                  >
-                    Subscribe Now {influencer.price ? `- ${influencer.price}` : ""}
-                  </button>
+                  <p className="text-indigo-700/80 mb-8">
+                    {allowedPaymentType === "subscribe" ? "Subscribe to reveal private socials and contact info." : 
+                     allowedPaymentType === "tip" ? "Send a tip to support." : 
+                     "Subscribe or send a tip to support."}
+                  </p>
+                  
+                  {allowedPaymentType === "both" && (
+                    <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-xl">
+                      <button
+                        onClick={() => setPaymentMode("subscribe")}
+                        className={cn("flex-1 py-2.5 text-sm font-bold rounded-lg transition-all", activeMode === "subscribe" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700")}
+                      >
+                        Subscribe
+                      </button>
+                      <button
+                        onClick={() => setPaymentMode("tip")}
+                        className={cn("flex-1 py-2.5 text-sm font-bold rounded-lg transition-all", activeMode === "tip" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700")}
+                      >
+                        Send Tip
+                      </button>
+                    </div>
+                  )}
+
+                  {activeMode === "subscribe" ? (
+                    <button 
+                      onClick={handleSubscribe}
+                      className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                    >
+                      Subscribe Now {influencer.price ? `- ${influencer.price}` : ""}
+                    </button>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">$</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={tipAmount}
+                          onChange={(e) => setTipAmount(e.target.value)}
+                          className="w-full pl-8 pr-4 py-4 bg-gray-50 border border-gray-200 rounded-xl font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                          placeholder="Amount"
+                        />
+                      </div>
+                      <button 
+                        onClick={handleTip}
+                        className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                      >
+                        Send Tip
+                      </button>
+                    </div>
+                  )}
                   
                   <div className="mt-8 flex items-center justify-center gap-1 text-gray-400 font-bold text-xs tracking-tight opacity-30">
                     <Lock className="w-3 h-3" />
@@ -481,7 +466,7 @@ const LandingPage = () => {
 };
 
 const Dashboard = () => {
-  const [user, loadingAuth] = useSupabaseAuth();
+  const [user, setUser] = useState<User | null>(null);
   const [influencers, setInfluencers] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -489,6 +474,7 @@ const Dashboard = () => {
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
+    paymentType: "both",
     priceId: "",
     price: "",
     profileImage: "",
@@ -501,55 +487,36 @@ const Dashboard = () => {
   });
 
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
 
     const fetchInfluencers = async () => {
       const { data } = await supabase
-        .from("influencers")
-        .select("*")
-        .eq("owner_id", user.id);
+        .from('influencers')
+        .select('*')
+        .eq('ownerId', user.id);
+      
       if (data) {
-        setInfluencers(data.map(inf => ({
-          id: inf.id,
-          name: inf.name,
-          slug: inf.slug,
-          priceId: inf.price_id,
-          price: inf.price,
-          profileImage: inf.profile_image,
-          bannerImage: inf.banner_image,
-          ownerId: inf.owner_id,
-          privateInfo: inf.private_info
-        })));
+        setInfluencers(data);
       }
     };
 
     fetchInfluencers();
-
-    const channel = supabase
-      .channel('dashboard-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'influencers',
-          filter: `owner_id=eq.${user.id}`
-        },
-        () => {
-          fetchInfluencers();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, [user]);
 
   const handleOpenCreate = () => {
     setEditingId(null);
     setFormData({
-      name: "", slug: "", priceId: "", price: "", profileImage: "", bannerImage: "",
+      name: "", slug: "", paymentType: "both", priceId: "", price: "", profileImage: "", bannerImage: "",
       snapchat: "", whatsapp: "", instagram: "", telegram: "", phoneNumber: ""
     });
     setIsModalOpen(true);
@@ -560,6 +527,7 @@ const Dashboard = () => {
     setFormData({
       name: inf.name || "",
       slug: inf.slug || "",
+      paymentType: inf.paymentType || "both",
       priceId: inf.priceId || "",
       price: inf.price || "",
       profileImage: inf.profileImage || "",
@@ -578,32 +546,31 @@ const Dashboard = () => {
     if (!user) return;
 
     const data = {
-      name: formData.name,
-      slug: formData.slug,
-      price_id: formData.priceId,
-      price: formData.price,
-      profile_image: formData.profileImage,
-      banner_image: formData.bannerImage,
-      owner_id: user.id,
-      private_info: {
+      ...formData,
+      ownerId: user.id,
+      privateInfo: {
         snapchat: formData.snapchat,
         whatsapp: formData.whatsapp,
         instagram: formData.instagram,
         telegram: formData.telegram,
         phoneNumber: formData.phoneNumber
-      },
-      updated_at: new Date().toISOString()
+      }
     };
 
     try {
       if (editingId) {
-        await supabase.from("influencers").update(data).eq("id", editingId);
+        await supabase.from('influencers').update(data).eq('id', editingId);
       } else {
-        await supabase.from("influencers").insert({
-          ...data,
-          createdAt: new Date().toISOString()
-        });
+        await supabase.from('influencers').insert([data]);
       }
+      
+      // Refresh list
+      const { data: updatedList } = await supabase
+        .from('influencers')
+        .select('*')
+        .eq('ownerId', user.id);
+      if (updatedList) setInfluencers(updatedList);
+      
       setIsModalOpen(false);
     } catch (error) {
       console.error("Error saving influencer page:", error);
@@ -774,6 +741,18 @@ const Dashboard = () => {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
+                        <label className="text-sm font-bold text-gray-700">Payment Options</label>
+                        <select
+                          value={formData.paymentType}
+                          onChange={e => setFormData({...formData, paymentType: e.target.value})}
+                          className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        >
+                          <option value="both">Subscription & Tips</option>
+                          <option value="subscribe">Subscription Only</option>
+                          <option value="tip">Tips Only</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
                         <label className="text-sm font-bold text-gray-700">Stripe Price ID</label>
                         <input 
                           required
@@ -784,6 +763,9 @@ const Dashboard = () => {
                           placeholder="price_H5v..."
                         />
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <label className="text-sm font-bold text-gray-700">Display Price</label>
                         <input 
@@ -870,27 +852,19 @@ const Dashboard = () => {
   );
 };
 
-const Home = ({ user }: { user: User | null }) => {
-  const [email, setEmail] = useState("");
-  const [showEmailLogin, setShowEmailLogin] = useState(false);
-  const navigate = useNavigate();
+const Home = ({ onOpenAuth }: { onOpenAuth: () => void }) => {
+  const [user, setUser] = useState<User | null>(null);
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: window.location.origin,
-      },
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
     });
-    if (error) {
-      alert(error.message);
-    } else {
-      alert("Check your email for the login link!");
-      setShowEmailLogin(false);
-    }
-  };
-
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+  
   return (
     <div className="min-h-screen bg-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 text-center">
@@ -909,57 +883,22 @@ const Home = ({ user }: { user: User | null }) => {
           <p className="text-xl text-gray-600 max-w-2xl mx-auto leading-relaxed">
             Create beautiful subscription landing pages in seconds. Reveal your Snapchat, WhatsApp, or phone number only to paid subscribers.
           </p>
-          
-          <div className="flex flex-col items-center justify-center gap-6 pt-4">
-            {!user && showEmailLogin ? (
-              <motion.form 
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                onSubmit={handleEmailLogin} 
-                className="w-full max-w-sm space-y-4 p-6 bg-gray-50 rounded-3xl border border-gray-100"
-              >
-                <div className="text-left">
-                  <label className="text-xs font-bold text-gray-500 uppercase ml-1">Creator Email</label>
-                  <input 
-                    type="email" 
-                    placeholder="you@example.com" 
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-3 mt-1 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                    required
-                  />
-                </div>
-                <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100">
-                  Send Magic Link
-                </button>
-                <button type="button" onClick={() => setShowEmailLogin(false)} className="text-sm text-gray-400 hover:text-gray-600">
-                  Back
-                </button>
-              </motion.form>
-            ) : (
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full">
-                <button 
-                  onClick={() => {
-                    if (user) {
-                      navigate("/dashboard");
-                    } else {
-                      setShowEmailLogin(true);
-                    }
-                  }}
-                  className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2"
-                >
-                  {user ? "Go to Dashboard" : "Start Creating"} <ChevronRight className="w-5 h-5" />
-                </button>
-                {!user && (
-                  <button 
-                    onClick={() => setShowEmailLogin(true)}
-                    className="w-full sm:w-auto px-8 py-4 bg-white text-gray-700 border border-gray-200 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all"
-                  >
-                    Login with Email
-                  </button>
-                )}
-              </div>
-            )}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4">
+            <Link 
+              to={user ? "/dashboard" : "#"}
+              onClick={(e) => {
+                if (!user) {
+                  e.preventDefault();
+                  onOpenAuth();
+                }
+              }}
+              className="w-full sm:w-auto px-8 py-4 bg-indigo-600 text-white rounded-2xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 flex items-center justify-center gap-2"
+            >
+              Start Creating <ChevronRight className="w-5 h-5" />
+            </Link>
+            <button className="w-full sm:w-auto px-8 py-4 bg-white text-gray-700 border border-gray-200 rounded-2xl font-bold text-lg hover:bg-gray-50 transition-all">
+              View Demo
+            </button>
           </div>
         </motion.div>
 
@@ -991,72 +930,122 @@ const Home = ({ user }: { user: User | null }) => {
   );
 };
 
-const ConfigRequired = () => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-    <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 text-center border border-gray-100">
-      <div className="w-16 h-16 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600 mx-auto mb-6">
-        <Lock className="w-8 h-8" />
-      </div>
-      <h2 className="text-2xl font-bold text-gray-900 mb-4">Configuration Required</h2>
-      <p className="text-gray-600 mb-8 leading-relaxed">
-        To use this application, you need to connect your Supabase project. 
-        Please add the following environment variables to your project settings:
-      </p>
-      <div className="space-y-3 text-left mb-8">
-        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 font-mono text-xs text-gray-500 break-all">
-          VITE_SUPABASE_URL
-        </div>
-        <div className="p-3 bg-gray-50 rounded-xl border border-gray-100 font-mono text-xs text-gray-500 break-all">
-          VITE_SUPABASE_ANON_KEY
-        </div>
-      </div>
-      <p className="text-sm text-gray-400">
-        Once added, the application will automatically refresh.
-      </p>
-    </div>
-  </div>
-);
-
-function useSupabaseAuth() {
+export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
 
   useEffect(() => {
-    if (!isSupabaseConfigured) {
-      setLoading(false);
-      return;
-    }
-
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
+      setUser(session?.user ?? null);
       setLoading(false);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? { id: session.user.id, email: session.user.email } : null);
-      setLoading(false);
+      setUser(session?.user ?? null);
     });
-
     return () => subscription.unsubscribe();
   }, []);
 
-  return [user, loading] as const;
-}
-
-export default function App() {
-  const [user, loading] = useSupabaseAuth();
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError("");
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+      setIsAuthModalOpen(false);
+    } catch (err: any) {
+      setAuthError(err.message);
+    }
+  };
 
   if (loading) return null;
-  if (!isSupabaseConfigured) return <ConfigRequired />;
 
   return (
     <Router>
-      <Navbar user={user} />
+      <Navbar user={user} onOpenAuth={() => setIsAuthModalOpen(true)} />
       <Routes>
-        <Route path="/" element={<Home user={user} />} />
+        <Route path="/" element={<Home onOpenAuth={() => setIsAuthModalOpen(true)} />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/p/:slug" element={<LandingPage />} />
       </Routes>
+
+      <AnimatePresence>
+        {isAuthModalOpen && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center justify-between mb-8">
+                  <h2 className="text-2xl font-bold text-gray-900">
+                    {isSignUp ? "Create Account" : "Welcome Back"}
+                  </h2>
+                  <button onClick={() => setIsAuthModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                    <Plus className="w-6 h-6 rotate-45" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleAuth} className="space-y-4">
+                  {authError && (
+                    <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100">
+                      {authError}
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-gray-700">Email</label>
+                    <input 
+                      required
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-gray-700">Password</label>
+                    <input 
+                      required
+                      type="password"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                      placeholder="••••••••"
+                    />
+                  </div>
+                  <button 
+                    type="submit"
+                    className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 mt-4"
+                  >
+                    {isSignUp ? "Sign Up" : "Sign In"}
+                  </button>
+                </form>
+
+                <div className="mt-6 text-center">
+                  <button 
+                    onClick={() => setIsSignUp(!isSignUp)}
+                    className="text-sm font-medium text-indigo-600 hover:text-indigo-800"
+                  >
+                    {isSignUp ? "Already have an account? Sign in" : "Need an account? Sign up"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </Router>
   );
 }

@@ -72,6 +72,40 @@ export async function createExpressApp() {
     }
   });
 
+  app.post("/api/create-tip-session", async (req, res) => {
+    const { amount, influencerId, influencerName, userId, successUrl, cancelUrl } = req.body;
+
+    try {
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: {
+                name: `Tip for ${influencerName}`,
+              },
+              unit_amount: Math.round(amount * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        mode: "payment",
+        success_url: `${successUrl}?session_id={CHECKOUT_SESSION_ID}&type=tip`,
+        cancel_url: cancelUrl,
+        metadata: {
+          influencerId,
+          userId: userId || "guest",
+          type: "tip"
+        },
+      });
+
+      res.json({ id: session.id, url: session.url });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/verify-session/:sessionId", async (req, res) => {
     const { sessionId } = req.params;
     
