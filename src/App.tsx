@@ -545,8 +545,14 @@ const Dashboard = () => {
     e.preventDefault();
     if (!user) return;
 
-    const data = {
-      ...formData,
+    const payload = {
+      name: formData.name,
+      slug: formData.slug,
+      paymentType: formData.paymentType,
+      priceId: formData.priceId,
+      price: formData.price,
+      profileImage: formData.profileImage,
+      bannerImage: formData.bannerImage,
       ownerId: user.id,
       privateInfo: {
         snapchat: formData.snapchat,
@@ -559,21 +565,26 @@ const Dashboard = () => {
 
     try {
       if (editingId) {
-        await supabase.from('influencers').update(data).eq('id', editingId);
+        const { error } = await supabase.from('influencers').update(payload).eq('id', editingId);
+        if (error) throw error;
       } else {
-        await supabase.from('influencers').insert([data]);
+        const { error } = await supabase.from('influencers').insert([payload]);
+        if (error) throw error;
       }
       
       // Refresh list
-      const { data: updatedList } = await supabase
+      const { data: updatedList, error: fetchError } = await supabase
         .from('influencers')
         .select('*')
         .eq('ownerId', user.id);
+        
+      if (fetchError) throw fetchError;
       if (updatedList) setInfluencers(updatedList);
       
       setIsModalOpen(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving influencer page:", error);
+      alert("Failed to save: " + error.message);
     }
   };
 
