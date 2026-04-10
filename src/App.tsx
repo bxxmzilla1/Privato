@@ -21,7 +21,8 @@ import {
   Copy,
   Check,
   Send,
-  Trash2
+  Trash2,
+  Heart
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -286,13 +287,26 @@ const LandingPage = () => {
             {!isSubscribed ? (
               <div className="space-y-6">
                 <div className="py-8">
-                  <Lock className="w-12 h-12 text-indigo-600 mx-auto mb-4" />
-                  <h2 className="text-xl font-bold text-indigo-900 mb-2">Unlock Private Access</h2>
-                  <p className="text-indigo-700/80 mb-8">
-                    {allowedPaymentType === "subscribe" ? "Subscribe to reveal private socials and contact info." : 
-                     allowedPaymentType === "tip" ? "Send a tip to support." : 
-                     "Subscribe or send a tip to support."}
-                  </p>
+                  {activeMode === "tip" ? (
+                    <>
+                      <div className="w-16 h-16 bg-pink-100 text-pink-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Heart className="w-8 h-8" />
+                      </div>
+                      <h2 className="text-xl font-bold text-gray-900 mb-2">Support {influencer.name}</h2>
+                      <p className="text-gray-500 mb-8">
+                        Send a tip to show your appreciation and support their content.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-12 h-12 text-indigo-600 mx-auto mb-4" />
+                      <h2 className="text-xl font-bold text-indigo-900 mb-2">Unlock Private Access</h2>
+                      <p className="text-indigo-700/80 mb-8">
+                        {allowedPaymentType === "subscribe" ? "Subscribe to reveal private socials and contact info." : 
+                         "Subscribe or send a tip to support."}
+                      </p>
+                    </>
+                  )}
                   
                   {allowedPaymentType === "both" && (
                     <div className="flex gap-2 mb-6 p-1 bg-gray-100 rounded-xl">
