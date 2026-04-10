@@ -22,7 +22,8 @@ import {
   Check,
   Send,
   Trash2,
-  Heart
+  Heart,
+  Upload
 } from "lucide-react";
 import { cn } from "./lib/utils";
 import { motion, AnimatePresence } from "motion/react";
@@ -487,6 +488,9 @@ const Dashboard = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     slug: "",
@@ -531,6 +535,8 @@ const Dashboard = () => {
 
   const handleOpenCreate = () => {
     setEditingId(null);
+    setProfileFile(null);
+    setBannerFile(null);
     setFormData({
       name: "", slug: "", paymentType: "both", priceId: "", price: "", profileImage: "", bannerImage: "",
       snapchat: "", whatsapp: "", instagram: "", telegram: "", phoneNumber: ""
@@ -540,6 +546,8 @@ const Dashboard = () => {
 
   const handleOpenEdit = (inf: any) => {
     setEditingId(inf.id);
+    setProfileFile(null);
+    setBannerFile(null);
     setFormData({
       name: inf.name || "",
       slug: inf.slug || "",
@@ -557,29 +565,57 @@ const Dashboard = () => {
     setIsModalOpen(true);
   };
 
+  const uploadImage = async (file: File) => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random()}.${fileExt}`;
+    const filePath = `${user?.id}/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('images')
+      .upload(filePath, file);
+
+    if (uploadError) {
+      throw uploadError;
+    }
+
+    const { data } = supabase.storage.from('images').getPublicUrl(filePath);
+    return data.publicUrl;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
-    const payload = {
-      name: formData.name,
-      slug: formData.slug,
-      paymentType: formData.paymentType,
-      priceId: formData.priceId,
-      price: formData.price,
-      profileImage: formData.profileImage,
-      bannerImage: formData.bannerImage,
-      ownerId: user.id,
-      privateInfo: {
-        snapchat: formData.snapchat,
-        whatsapp: formData.whatsapp,
-        instagram: formData.instagram,
-        telegram: formData.telegram,
-        phoneNumber: formData.phoneNumber
-      }
-    };
-
+    setIsUploading(true);
     try {
+      let profileImageUrl = formData.profileImage;
+      let bannerImageUrl = formData.bannerImage;
+
+      if (profileFile) {
+        profileImageUrl = await uploadImage(profileFile);
+      }
+      if (bannerFile) {
+        bannerImageUrl = await uploadImage(bannerFile);
+      }
+
+      const payload = {
+        name: formData.name,
+        slug: formData.slug,
+        paymentType: formData.paymentType,
+        priceId: formData.priceId,
+        price: formData.price,
+        profileImage: profileImageUrl,
+        bannerImage: bannerImageUrl,
+        ownerId: user.id,
+        privateInfo: {
+          snapchat: formData.snapchat,
+          whatsapp: formData.whatsapp,
+          instagram: formData.instagram,
+          telegram: formData.telegram,
+          phoneNumber: formData.phoneNumber
+        }
+      };
+
       if (editingId) {
         const { error } = await supabase.from('influencers').update(payload).eq('id', editingId);
         if (error) throw error;
@@ -601,6 +637,8 @@ const Dashboard = () => {
     } catch (error: any) {
       console.error("Error saving influencer page:", error);
       alert("Failed to save: " + error.message);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -769,24 +807,42 @@ const Dashboard = () => {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
-                        <label className="text-sm font-bold text-gray-700">Profile Image URL</label>
-                        <input 
-                          type="url"
-                          value={formData.profileImage}
-                          onChange={e => setFormData({...formData, profileImage: e.target.value})}
-                          className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                          placeholder="https://example.com/profile.jpg"
-                        />
+                        <label className="text-sm font-bold text-gray-700">Profile Image</label>
+                        <div className="relative">
+                          <input 
+                            type="file"
+                            accept="image/*"
+                            onChange={e => {
+                              if (e.target.files && e.target.files[0]) {
+                                setProfileFile(e.target.files[0]);
+                              }
+                            }}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between text-gray-500 hover:bg-gray-100 transition-all">
+                            <span className="truncate">{profileFile ? profileFile.name : (formData.profileImage ? "Existing Image" : "Choose file...")}</span>
+                            <Upload className="w-5 h-5 text-gray-400" />
+                          </div>
+                        </div>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-sm font-bold text-gray-700">Banner Image URL</label>
-                        <input 
-                          type="url"
-                          value={formData.bannerImage}
-                          onChange={e => setFormData({...formData, bannerImage: e.target.value})}
-                          className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                          placeholder="https://example.com/banner.jpg"
-                        />
+                        <label className="text-sm font-bold text-gray-700">Banner Image</label>
+                        <div className="relative">
+                          <input 
+                            type="file"
+                            accept="image/*"
+                            onChange={e => {
+                              if (e.target.files && e.target.files[0]) {
+                                setBannerFile(e.target.files[0]);
+                              }
+                            }}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <div className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center justify-between text-gray-500 hover:bg-gray-100 transition-all">
+                            <span className="truncate">{bannerFile ? bannerFile.name : (formData.bannerImage ? "Existing Image" : "Choose file...")}</span>
+                            <Upload className="w-5 h-5 text-gray-400" />
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -888,9 +944,10 @@ const Dashboard = () => {
 
                     <button 
                       type="submit"
-                      className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200"
+                      disabled={isUploading}
+                      className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {editingId ? "Update Page" : "Create Page"}
+                      {isUploading ? "Uploading..." : (editingId ? "Update Page" : "Create Page")}
                     </button>
                   </form>
                 </div>
@@ -1017,7 +1074,7 @@ const Home = ({ onOpenAuth }: { onOpenAuth: () => void }) => {
   );
 };
 
-export default function App() {
+function AppContent() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -1025,6 +1082,7 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -1049,6 +1107,7 @@ export default function App() {
         if (error) throw error;
       }
       setIsAuthModalOpen(false);
+      navigate("/dashboard");
     } catch (err: any) {
       setAuthError(err.message);
     }
@@ -1057,7 +1116,7 @@ export default function App() {
   if (loading) return null;
 
   return (
-    <Router>
+    <>
       <Navbar user={user} onOpenAuth={() => setIsAuthModalOpen(true)} />
       <Routes>
         <Route path="/" element={<Home onOpenAuth={() => setIsAuthModalOpen(true)} />} />
@@ -1133,6 +1192,14 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <Router>
+      <AppContent />
     </Router>
   );
 }
